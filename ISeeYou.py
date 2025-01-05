@@ -9,10 +9,12 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = os.getenv("TF_CPP_MIN_LOG_LEVEL", "3")
 
 import cv2
 from gaze_tracking_engine import GazeTrackingEngine
+from gaze_mapping_engine import GazeMappingEngine
 
 
 def main():
     gaze_engine = GazeTrackingEngine()
+    gaze_mapping = GazeMappingEngine()
 
     # Start webcam feed
     cam = cv2.VideoCapture(0)
@@ -30,11 +32,19 @@ def main():
         annotated_frame = gaze_engine.annotated_frame()
         cv2.imshow("ISeeYou Gaze Tracking", annotated_frame)
 
+        horizontal, vertical = gaze_engine.calculate_gaze()
+
+        if isinstance(horizontal, (int, float)) and isinstance(vertical, (int, float)):
+            gaze_mapping.record_gaze(horizontal, vertical)
+        else:
+            print(f"Invalid gaze data: horizontal={horizontal}, vertical={vertical}")
+
         if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
             break
 
     cam.release()
     cv2.destroyAllWindows()
+    gaze_mapping.generate_heatmap()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 import cv2
 import mediapipe as mp
 import numpy as np
+import configparser
 
 
 class GazeTrackingEngine:
@@ -10,6 +11,14 @@ class GazeTrackingEngine:
         self.eye_left = None
         self.eye_right = None
         self.head_orientation = None
+
+        self.config = configparser.ConfigParser()
+        self.config.read('config.ini')
+
+        self.horizontal_left_threshold = float(self.config['THRESHOLDS']['HORIZONTAL_LEFT'])
+        self.horizontal_right_threshold = float(self.config['THRESHOLDS']['HORIZONTAL_RIGHT'])
+        self.vertical_up_threshold = float(self.config['THRESHOLDS']['VERTICAL_UP'])
+        self.vertical_down_threshold = float(self.config['THRESHOLDS']['VERTICAL_DOWN'])
 
         self.mp_face_mesh = mp.solutions.face_mesh.FaceMesh(max_num_faces=1, refine_landmarks=True)
         self.mp_drawing = mp.solutions.drawing_utils
@@ -54,7 +63,7 @@ class GazeTrackingEngine:
         """
         Calculates the head orientation (yaw, pitch) using specific landmarks.
         """
-        indices = [1, 33, 61, 199, 263, 291]  # Indices for key landmarks
+        indices = [1, 33, 61, 199, 263, 291]
         face_3d = []
         face_2d = []
 
@@ -77,13 +86,13 @@ class GazeTrackingEngine:
         success, rot_vec, trans_vec = cv2.solvePnP(face_3d, face_2d, cam_matrix, dist_matrix)
 
         if not success:
-            return {"yaw": 0, "pitch": 0}  # Default orientation if solvePnP fails
+            return {"yaw": 0, "pitch": 0}
 
         rmat, _ = cv2.Rodrigues(rot_vec)
         angles, _, _, _, _, _ = cv2.RQDecomp3x3(rmat)
 
-        yaw = angles[1] * 3  # Scale factor
-        pitch = angles[0] * 3  # Scale factor
+        yaw = angles[1] * 3
+        pitch = angles[0] * 3
 
         return {"yaw": yaw, "pitch": pitch}
 
@@ -103,33 +112,44 @@ class GazeTrackingEngine:
         if self.eye_left and self.eye_right:
             left_eye_height = self.eye_left[4][1] - self.eye_left[3][1]
             right_eye_height = self.eye_right[4][1] - self.eye_right[3][1]
-            avg_eye_height = (left_eye_height + right_eye_height) / 2
-            return avg_eye_height < 5
-        return False
+
+            left_eye_closed = left_eye_height < 5
+            right_eye_closed = right_eye_height < 5
+
+            both_eyes_closed = left_eye_closed and right_eye_closed
+
+            return both_eyes_closed
+
+        return False, False, False
 
     def calculate_gaze(self):
         """
-        Determines the gaze direction based on eye and head orientation.
+        Calculates numerical values for horizontal and vertical gaze.
+        Returns:
+            horizontal (float): Horizontal gaze value (-2 for no gaze, -1 for left, 0 for center, 1 for right).
+            vertical (float): Vertical gaze value (-2 for no gaze, -1 for up, 0 for center, 1 for down).
         """
         if self._are_eyes_closed():
-            return "Eyes Closed"
+            return -2, -2
 
         horizontal_ratio, vertical_ratio = self._get_gaze_details()
 
         if horizontal_ratio is None or vertical_ratio is None:
-            return "No Gaze Detected"
+            return None, None
 
-        if vertical_ratio < 0.35:
-            return "Looking Up"
-        elif vertical_ratio > 0.65:
-            return "Looking Down"
+        horizontal = (
+            -1 if horizontal_ratio < self.horizontal_left_threshold
+            else 1 if horizontal_ratio > self.horizontal_right_threshold
+            else 0
+        )
 
-        if horizontal_ratio < 0.35:
-            return "Looking Left"
-        elif horizontal_ratio > 0.65:
-            return "Looking Right"
-        else:
-            return "Looking Center"
+        vertical = (
+            -1 if vertical_ratio < self.vertical_up_threshold
+            else 1 if vertical_ratio > self.vertical_down_threshold
+            else 0
+        )
+
+        return horizontal, vertical
 
     def _get_gaze_details(self):
         """
@@ -156,7 +176,16 @@ class GazeTrackingEngine:
                 for point in eye:
                     cv2.circle(frame, point, 2, (0, 255, 0), -1)
 
-        gaze_text = self.calculate_gaze()
+        horizontal, vertical = self.calculate_gaze()
+        if horizontal == None and vertical == None:
+            gaze_text = "No Gaze Detected"
+        elif horizontal == -2 and vertical == -2:
+            gaze_text = "Eyes closed"
+        elif horizontal == 0 and vertical == 0:
+            gaze_text = "Looking Center"
+        else:
+            gaze_text = f"{'Left' if horizontal == -1 else 'Right' if horizontal == 1 else 'Center'} and {'Up' if vertical == -1 else 'Down' if vertical == 1 else 'Center'}"
+
         cv2.putText(frame, gaze_text, (30, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 1)
 
         if self.head_orientation:
