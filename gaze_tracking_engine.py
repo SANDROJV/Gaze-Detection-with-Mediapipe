@@ -11,6 +11,7 @@ class GazeTrackingEngine:
         self.eye_left = None
         self.eye_right = None
         self.head_orientation = None
+        self.forehead_window_name = "Forehead Region"
 
         self.config = configparser.ConfigParser()
         self.config.read('config.ini')
@@ -25,7 +26,8 @@ class GazeTrackingEngine:
 
     def _analyze(self, frame):
         """
-        Detects face, initializes eye regions, and draws landmarks using MediaPipe.
+        Detects face, initializes eye regions, and extracts the forehead region using MediaPipe.
+        Returns the forehead region ready for analysis, None otherwise.
         """
         self.frame = frame
         results = self.mp_face_mesh.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
@@ -47,6 +49,11 @@ class GazeTrackingEngine:
             self._extract_eye_landmarks(landmarks, frame.shape[:2])
             self.head_orientation = self._calculate_head_orientation(landmarks, frame.shape[1], frame.shape[0])
 
+            forehead_region = self._extract_forehead_region(landmarks, frame)
+            return forehead_region
+
+        return None
+
     def _extract_eye_landmarks(self, landmarks, frame_shape):
         """
         Extracts landmarks for left and right eyes.
@@ -58,6 +65,27 @@ class GazeTrackingEngine:
 
         self.eye_left = get_landmark_points([33, 133, 468, 159, 145])
         self.eye_right = get_landmark_points([362, 263, 473, 386, 374])
+
+    def _extract_forehead_region(self, landmarks, frame):
+        """
+        Extract forehead region using expanded forehead landmarks.
+        """
+        h, w = frame.shape[:2]
+
+        try:
+            # Adjusted indices to include the entire forehead
+            forehead_landmarks = [
+                landmarks.landmark[i] for i in [67, 103, 10, 338, 297, 332, 284, 251, 389, 356]
+            ]
+        except IndexError:
+            return None
+
+        x_coords = [int(lm.x * w) for lm in forehead_landmarks]
+        y_coords = [int(lm.y * h) for lm in forehead_landmarks]
+        x1, x2 = max(min(x_coords) - 30, 0), min(max(x_coords) + 30, w)
+        y1, y2 = max(min(y_coords) - 60, 0), min(max(y_coords) + 20, h)
+
+        return frame[y1:y2, x1:x2]
 
     def _calculate_head_orientation(self, landmarks, w, h):
         """
@@ -186,12 +214,12 @@ class GazeTrackingEngine:
         else:
             gaze_text = f"{'Left' if horizontal == -1 else 'Right' if horizontal == 1 else 'Center'} and {'Up' if vertical == -1 else 'Down' if vertical == 1 else 'Center'}"
 
-        cv2.putText(frame, gaze_text, (30, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 1)
+        cv2.putText(frame, gaze_text, (30, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
         if self.head_orientation:
             yaw, pitch = self.head_orientation["yaw"], self.head_orientation["pitch"]
             orientation_text = f"Head: {'Left' if yaw < -0.04 else 'Right' if yaw > 0.04 else 'Center'}, "
             orientation_text += f"{'Up' if pitch > 0.04 else 'Down' if pitch < -0.04 else 'Center'}"
-            cv2.putText(frame, orientation_text, (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 1)
+            cv2.putText(frame, orientation_text, (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
         return frame

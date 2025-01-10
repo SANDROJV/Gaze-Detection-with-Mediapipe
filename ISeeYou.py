@@ -1,5 +1,7 @@
 import os
 import logging
+import time
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -10,41 +12,57 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = os.getenv("TF_CPP_MIN_LOG_LEVEL", "3")
 import cv2
 from gaze_tracking_engine import GazeTrackingEngine
 from gaze_mapping_engine import GazeMappingEngine
+from heartrate_tracking_engine import HeartRateTrackingEngine
+from anomaly_tracking_engine import AnomalyTrackingEngine
 
 
 def main():
     gaze_engine = GazeTrackingEngine()
     gaze_mapping = GazeMappingEngine()
+    heart_rate_engine = HeartRateTrackingEngine()
+    anomaly_tracker = AnomalyTrackingEngine()
 
     # Start webcam feed
     cam = cv2.VideoCapture(0)
     cam.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
 
-    while cam.isOpened():
-        ret, frame = cam.read()
-        if not ret:
-            print("Failed to grab frame.")
-            break
+    try:
+        while cam.isOpened():
+            ret, frame = cam.read()
+            if not ret and frame is None:
+                print("Failed to grab frame.")
+                break
 
-        # Flips the frame for a natural view
-        frame = cv2.flip(frame, 1)
-        gaze_engine._analyze(frame)
-        annotated_frame = gaze_engine.annotated_frame()
-        cv2.imshow("ISeeYou Gaze Tracking", annotated_frame)
+            frame = cv2.flip(frame, 1)  # Flips the frame for a natural view
+            gaze_engine._analyze(frame)
+            annotated_frame = gaze_engine.annotated_frame()
 
-        horizontal, vertical = gaze_engine.calculate_gaze()
+            forehead_region = gaze_engine._analyze(frame)
+            if forehead_region is not None:
+                magnified_forehead = heart_rate_engine.process_forehead(forehead_region)
+                heart_rate_engine.calculate_heart_rate(magnified_forehead)
+            annotated_frame = heart_rate_engine.annotate_frame(annotated_frame)
 
-        if isinstance(horizontal, (int, float)) and isinstance(vertical, (int, float)):
-            gaze_mapping.record_gaze(horizontal, vertical)
-        else:
-            print(f"Invalid gaze data: horizontal={horizontal}, vertical={vertical}")
+            horizontal, vertical = gaze_engine.calculate_gaze()
 
-        if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
-            break
+            if isinstance(horizontal, (int, float)) and isinstance(vertical, (int, float)):
+                anomaly_tracker.analyze_live_data(horizontal, vertical)
+                anomaly_tracker.draw_status(annotated_frame)
+            else:
+                print(f"Invalid gaze data: horizontal={horizontal}, vertical={vertical}")
 
-    cam.release()
-    cv2.destroyAllWindows()
-    gaze_mapping.generate_heatmap()
+            cv2.imshow("ISeeYou Gaze Tracking", annotated_frame)
+
+            if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
+                break
+
+
+    except Exception as e:
+        logging.error(f"An error occurred: {e}")
+    finally:
+        cam.release()
+        cv2.destroyAllWindows()
+        gaze_mapping.generate_heatmap()
 
 
 if __name__ == "__main__":
