@@ -1,22 +1,30 @@
 import cv2
 import numpy as np
 from scipy.signal import butter, lfilter
+import time
 
 
 class HeartRateTrackingEngine:
-    def __init__(self, fps=30, freq_band=(0.8, 3.0), amplification=15):
+    def __init__(self):
         """
         Initialize HeartRateTrackingEngine.
         - fps: Frames per second of the input video.
         - freq_band: Tuple indicating the bandpass filter range in Hz.
         - amplification: Factor to amplify color changes.
+        - change_threshold: Threshold for detecting rapid heart rate changes (as a fraction of the current heart rate).
+        - warning_duration: Duration (in seconds) for sustained change before triggering a warning.
         """
-        self.fps = fps
-        self.freq_band = freq_band
-        self.amplification = amplification
+        self.fps = 30
+        self.freq_band = (0.8, 3.0)
+        self.amplification = 15
         self.signal_buffer = []
-        self.buffer_size = fps * 5  # 5 seconds of data
+        self.buffer_size = self.fps * 5  # 5 seconds of data
         self.heart_rate = 0
+        self.change_threshold = 0.15
+        self.warning_duration = 3
+        self.previous_heart_rate = 0
+        self.last_change_time = None
+        self.warning_active = False
 
     def _butter_bandpass_filter(self, data, lowcut, highcut, fs, order=3):
         nyquist = 0.5 * fs
@@ -79,18 +87,56 @@ class HeartRateTrackingEngine:
             if self.freq_band[0] <= peak_frequency <= self.freq_band[1]:
                 self.heart_rate = int(peak_frequency * 60)  # Convert Hz to BPM
 
+        self._check_heart_rate_stability()
+
         return self.heart_rate
+
+    def _check_heart_rate_stability(self):
+        """
+        Check for rapid changes in heart rate and activate warnings if needed.
+        """
+        if not self.previous_heart_rate:
+            self.previous_heart_rate = self.heart_rate
+            self.warning_active = False
+            return
+
+        change_ratio = abs(self.heart_rate - self.previous_heart_rate) / self.previous_heart_rate
+        current_time = time.time()
+
+        if change_ratio > self.change_threshold:
+            if self.last_change_time and current_time - self.last_change_time > self.warning_duration:
+                self.warning_active = True
+            else:
+                self.last_change_time = current_time
+        else:
+            self.last_change_time = None
+            self.warning_active = False
+
+        self.previous_heart_rate = self.heart_rate
 
     def annotate_frame(self, frame):
         """
-        Annotate the frame with the current heart rate.
+        Annotate the frame with the current heart rate and warnings if active.
         """
-        return cv2.putText(
+        cv2.putText(
             frame,
             f"Heart Rate: {self.heart_rate} BPM",
-            (30, 90),
+            (30, 120),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
             (255, 255, 255),
             1
         )
+
+        if self.warning_active:
+            cv2.putText(
+                frame,
+                "WARNING: Unsteady heart rate! Pull over!",
+                (30, 150),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 0, 255),
+                1
+            )
+
+        return frame

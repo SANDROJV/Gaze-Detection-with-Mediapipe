@@ -47,12 +47,10 @@ class GazeMappingEngine:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 row = [timestamp, horizontal, vertical]
 
-                # Write to session CSV
                 with open(self.session_csv, mode="a", newline="") as session_file:
                     writer = csv.writer(session_file)
                     writer.writerow(row)
 
-                # Write to study CSV
                 with open(self.study_csv, mode="a", newline="") as study_file:
                     writer = csv.writer(study_file)
                     writer.writerow(row)
@@ -66,7 +64,6 @@ class GazeMappingEngine:
         Generates a heatmap from the gaze data stored in the CSV file.
         """
         try:
-            # Load the CSV data
             df = pd.read_csv(self.session_csv)
 
             if df.empty:

@@ -2,6 +2,7 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import configparser
+import time
 
 
 class GazeTrackingEngine:
@@ -12,6 +13,8 @@ class GazeTrackingEngine:
         self.eye_right = None
         self.head_orientation = None
         self.forehead_window_name = "Forehead Region"
+        self.change_threshold = 0.15
+        self.blink_timer = None
 
         self.config = configparser.ConfigParser()
         self.config.read('config.ini')
@@ -73,7 +76,6 @@ class GazeTrackingEngine:
         h, w = frame.shape[:2]
 
         try:
-            # Adjusted indices to include the entire forehead
             forehead_landmarks = [
                 landmarks.landmark[i] for i in [67, 103, 10, 338, 297, 332, 284, 251, 389, 356]
             ]
@@ -198,6 +200,7 @@ class GazeTrackingEngine:
         Overlays gaze direction, blinking state, and head orientation on the frame.
         """
         frame = self.frame.copy()
+        current_time = time.time()
 
         for eye in (self.eye_left, self.eye_right):
             if eye:
@@ -209,9 +212,16 @@ class GazeTrackingEngine:
             gaze_text = "No Gaze Detected"
         elif horizontal == -2 and vertical == -2:
             gaze_text = "Eyes closed"
+            if self.blink_timer is None:
+                self.blink_timer = current_time
+            elif current_time - self.blink_timer > 2:
+                cv2.putText(frame, "Warning! Eyes closed!", (140, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
         elif horizontal == 0 and vertical == 0:
+            self.blink_timer = None
             gaze_text = "Looking Center"
         else:
+            self.blink_timer = None
             gaze_text = f"{'Left' if horizontal == -1 else 'Right' if horizontal == 1 else 'Center'} and {'Up' if vertical == -1 else 'Down' if vertical == 1 else 'Center'}"
 
         cv2.putText(frame, gaze_text, (30, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)

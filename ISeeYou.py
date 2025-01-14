@@ -1,7 +1,5 @@
 import os
 import logging
-import time
-
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -14,6 +12,7 @@ from gaze_tracking_engine import GazeTrackingEngine
 from gaze_mapping_engine import GazeMappingEngine
 from heartrate_tracking_engine import HeartRateTrackingEngine
 from anomaly_tracking_engine import AnomalyTrackingEngine
+from road_tracking_engine import RoadTrackingEngine
 
 
 def main():
@@ -21,17 +20,29 @@ def main():
     gaze_mapping = GazeMappingEngine()
     heart_rate_engine = HeartRateTrackingEngine()
     anomaly_tracker = AnomalyTrackingEngine()
+    road_tracker = RoadTrackingEngine()
 
     # Start webcam feed
     cam = cv2.VideoCapture(0)
     cam.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
 
+    video_path = "road_video.mp4"
+    video = cv2.VideoCapture(video_path)
+    if not video.isOpened():
+        print(f"Failed to open video: {video_path}")
+        return
+
     try:
-        while cam.isOpened():
+        while cam.isOpened() and video.isOpened():
             ret, frame = cam.read()
             if not ret and frame is None:
                 print("Failed to grab frame.")
                 break
+
+            ret_video, frame_video = video.read()
+            if not ret_video or frame_video is None:
+                video.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                continue
 
             frame = cv2.flip(frame, 1)  # Flips the frame for a natural view
             gaze_engine._analyze(frame)
@@ -43,24 +54,28 @@ def main():
                 heart_rate_engine.calculate_heart_rate(magnified_forehead)
             annotated_frame = heart_rate_engine.annotate_frame(annotated_frame)
 
-            horizontal, vertical = gaze_engine.calculate_gaze()
+            road_direction = road_tracker.process_frame(frame_video)
+            frame_video = road_tracker.annotate_frame(frame_video, road_direction)
 
+            horizontal, vertical = gaze_engine.calculate_gaze()
             if isinstance(horizontal, (int, float)) and isinstance(vertical, (int, float)):
-                anomaly_tracker.analyze_live_data(horizontal, vertical)
+                gaze_mapping.record_gaze(horizontal, vertical)
+                anomaly_tracker.analyze_live_data(horizontal, vertical, road_direction)
                 anomaly_tracker.draw_status(annotated_frame)
             else:
                 print(f"Invalid gaze data: horizontal={horizontal}, vertical={vertical}")
 
-            cv2.imshow("ISeeYou Gaze Tracking", annotated_frame)
+            cv2.imshow("ISeeYou - Gaze Tracking", annotated_frame)
+            cv2.imshow("ISeeYou - Road Detection", frame_video)
 
             if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
                 break
 
-
     except Exception as e:
-        logging.error(f"An error occurred: {e}")
+        logging.error(f"An error occurred: {e}", exc_info=True)
     finally:
         cam.release()
+        video.release()
         cv2.destroyAllWindows()
         gaze_mapping.generate_heatmap()
 

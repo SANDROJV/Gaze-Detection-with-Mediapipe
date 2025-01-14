@@ -36,9 +36,7 @@ class AnomalyTrackingEngine:
         self.model.to(self.device)
         self.center_threshold = 0.05
         self.drift_start_time = None
-        self.alert_duration = 4
-
-        # Load and preprocess gaze data
+        self.alert_duration = 2
         self.gaze_data = self.load_gaze_data()
         self.train_model()
 
@@ -78,7 +76,6 @@ class AnomalyTrackingEngine:
         if len(self.gaze_data) == 0:
             return
 
-        # Prepare dataset and data loader
         dataset = GazeDataset(self.gaze_data)
         loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
 
@@ -99,8 +96,6 @@ class AnomalyTrackingEngine:
                 optimizer.step()
                 epoch_loss += loss.item()
 
-
-        # Save the trained model
         torch.save(self.model.state_dict(), self.model_path)
 
     def load_model(self):
@@ -113,18 +108,25 @@ class AnomalyTrackingEngine:
         except Exception as e:
             print(f"Error loading model: {e}")
 
-    def analyze_live_data(self, horizontal, vertical):
+    def analyze_live_data(self, horizontal, vertical, road_direction):
         """
-        Analyze live gaze data for anomalies using the trained model.
+        Analyze live gaze data for anomalies using the trained model, considering road direction.
         """
         with torch.no_grad():
             input_data = torch.tensor([[horizontal, vertical]], dtype=torch.float32).to(self.device)
             prediction = self.model(input_data).item()
             is_anomaly = prediction > 0.5
 
+            # Check gaze direction against road direction
+            road_match = (
+                    (road_direction == "Forward" and horizontal == 0) or
+                    (road_direction == "Left" and horizontal == -1) or
+                    (road_direction == "Right" and horizontal == 1)
+            )
+
             current_time = time.time()
 
-            if is_anomaly:
+            if is_anomaly and not road_match:
                 if self.drift_start_time is None:
                     self.drift_start_time = current_time
                 elif current_time - self.drift_start_time > self.alert_duration:
@@ -139,4 +141,5 @@ class AnomalyTrackingEngine:
         """
         color = (0, 0, 255) if "Warning" in self.status_text else (255, 255, 255)
         font_scale = 0.7 if "Warning" in self.status_text else 0.5
-        cv2.putText(frame, self.status_text, (30, 120), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 1, cv2.LINE_AA)
+        thickness = 2 if "Warning" in self.status_text else 1
+        cv2.putText(frame, self.status_text, (30, 90), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
