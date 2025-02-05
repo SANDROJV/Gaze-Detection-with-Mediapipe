@@ -1,4 +1,3 @@
-import csv
 import pandas as pd
 import numpy as np
 import torch
@@ -24,12 +23,11 @@ class GazeDataset(Dataset):
 
 
 class AnomalyTrackingEngine:
-    def __init__(self, csv_file="study_data.csv",
-                 model_path="gaze_model.pth", train_epochs=20, batch_size=16):
-        self.csv_file = csv_file
-        self.model_path = model_path
-        self.train_epochs = train_epochs
-        self.batch_size = batch_size
+    def __init__(self):
+        self.csv_file = "./Engines/Data/study_data.csv"
+        self.model_path = "./Engines/Data/gaze_model.pth"
+        self.train_epochs = 20
+        self.batch_size = 16
         self.status_text = "Driver's gaze is normal."
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = self.build_model()
@@ -91,6 +89,7 @@ class AnomalyTrackingEngine:
                 x, y = x.to(self.device), y.to(self.device)
                 optimizer.zero_grad()
                 y_pred = self.model(x).squeeze()
+                y = y.view_as(y_pred)
                 loss = criterion(y_pred, y)
                 loss.backward()
                 optimizer.step()
@@ -108,7 +107,7 @@ class AnomalyTrackingEngine:
         except Exception as e:
             print(f"Error loading model: {e}")
 
-    def analyze_live_data(self, horizontal, vertical, road_direction):
+    def analyze_live_data(self, horizontal, vertical, road_direction, head_direction):
         """
         Analyze live gaze data for anomalies using the trained model, considering road direction.
         """
@@ -124,9 +123,16 @@ class AnomalyTrackingEngine:
                     (road_direction == "Right" and horizontal == 1)
             )
 
+            # Check head direction against road direction
+            head_match = (
+                    (head_direction == "Center" and road_direction == "Forward") or
+                    (head_direction == "Left" and road_direction == "Left") or
+                    (head_direction == "Right" and road_direction == "Right")
+            )
+
             current_time = time.time()
 
-            if is_anomaly and not road_match:
+            if is_anomaly and not road_match and not head_match:
                 if self.drift_start_time is None:
                     self.drift_start_time = current_time
                 elif current_time - self.drift_start_time > self.alert_duration:
@@ -135,11 +141,11 @@ class AnomalyTrackingEngine:
                 self.drift_start_time = None
                 self.status_text = "Driver's gaze is normal."
 
-    def draw_status(self, frame):
+    def annotate_frame(self, frame, x, y):
         """
         Draw the current status text on the given frame.
         """
         color = (0, 0, 255) if "Warning" in self.status_text else (255, 255, 255)
-        font_scale = 0.7 if "Warning" in self.status_text else 0.5
+        font_scale = 0.55 if "Warning" in self.status_text else 0.5
         thickness = 2 if "Warning" in self.status_text else 1
-        cv2.putText(frame, self.status_text, (30, 90), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
+        cv2.putText(frame, self.status_text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)

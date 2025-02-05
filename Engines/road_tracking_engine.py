@@ -5,14 +5,15 @@ from collections import deque
 
 class RoadTrackingEngine:
     def __init__(self):
-        self.low_threshold = 50
-        self.high_threshold = 150
-        self.direction_buffer = deque(maxlen=10)
+        self.direction_buffer = deque(maxlen=5)  # Stores slopes over multiple frames
 
     def process_frame(self, frame):
         """
         Detect road direction from a single frame.
         """
+        if frame is None or not isinstance(frame, np.ndarray):
+            raise ValueError("Invalid frame input.")
+
         # Step 1: Edge Detection
         edges = self._canny(frame)
 
@@ -22,16 +23,15 @@ class RoadTrackingEngine:
         # Step 3: Analyze Road Direction
         direction = self._detect_road_direction(region)
 
-        # Step 4: Smooth Direction with Buffer
-        self.direction_buffer.append(direction)
-        stable_direction = self._get_stable_direction()
-
-        return stable_direction
+        return direction
 
     def _canny(self, image):
+        """
+        Apply Canny Edge Detection with Gaussian Blur.
+        """
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         blur = cv2.GaussianBlur(gray, (5, 5), 0)
-        edges = cv2.Canny(blur, self.low_threshold, self.high_threshold)
+        edges = cv2.Canny(blur, 50, 100)
         return edges
 
     def _region_of_interest(self, image, shape):
@@ -54,50 +54,49 @@ class RoadTrackingEngine:
         Analyze road direction based on detected lines in the region of interest.
         """
         # Detect lines using Hough Transform
-        lines = cv2.HoughLinesP(region, 2, np.pi / 180, 100, minLineLength=50, maxLineGap=150)
+        lines = cv2.HoughLinesP(region, 2, np.pi / 180, 50, minLineLength=50, maxLineGap=100)
 
         if lines is None or len(lines) == 0:
             return "Forward"
 
-        left_slopes = []
-        right_slopes = []
+        slopes = []
 
         for line in lines:
             x1, y1, x2, y2 = line[0]
-            if x2 == x1:
+            if x2 == x1:  # Avoid division by zero (vertical lines)
                 continue
 
             slope = (y2 - y1) / (x2 - x1)
+            slopes.append(slope)
 
-            if slope < -0.5:  # Left-sloping lines
-                left_slopes.append(slope)
-            elif slope > 0.5:  # Right-sloping lines
-                right_slopes.append(slope)
+        if not slopes:
+            return "Forward"
 
-        # Determine road direction based on the balance of left and right slopes
-        if len(left_slopes) > len(right_slopes):
+        avg_slope = np.mean(slopes)  # Compute average slope
+
+        # Update direction buffer with rolling average
+        self.direction_buffer.append(avg_slope)
+
+        avg_slope_buffered = np.mean(self.direction_buffer)
+
+        # Determine turn direction based on average slope
+        if avg_slope_buffered < 0.15:
             return "Left"
-        elif len(right_slopes) > len(left_slopes):
+        elif avg_slope_buffered > 0.25:
             return "Right"
         else:
             return "Forward"
 
-    def _get_stable_direction(self):
-        """
-        Determine the most frequent direction in the buffer.
-        """
-        if not self.direction_buffer:
-            return "Forward"
-        return max(set(self.direction_buffer), key=self.direction_buffer.count)
-
-    def annotate_frame(self, frame, road_direction):
+    def annotate_frame(self, frame, road_direction, x, y):
         """
         Annotate the frame with the road direction as text.
         """
+        if frame is None or not isinstance(frame, np.ndarray):
+            raise ValueError("Invalid frame input.")
         cv2.putText(
             frame,
             f"Road Direction: {road_direction}",
-            (30, 30),
+            (x, y),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.5,
             (255, 255, 255),

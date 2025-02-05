@@ -15,17 +15,17 @@ class GazeTrackingEngine:
         self.forehead_window_name = "Forehead Region"
         self.change_threshold = 0.15
         self.blink_timer = None
-
         self.config = configparser.ConfigParser()
-        self.config.read('config.ini')
-
+        self.config.read('./Engines/Data/config.ini')
         self.horizontal_left_threshold = float(self.config['THRESHOLDS']['HORIZONTAL_LEFT'])
         self.horizontal_right_threshold = float(self.config['THRESHOLDS']['HORIZONTAL_RIGHT'])
         self.vertical_up_threshold = float(self.config['THRESHOLDS']['VERTICAL_UP'])
         self.vertical_down_threshold = float(self.config['THRESHOLDS']['VERTICAL_DOWN'])
-
         self.mp_face_mesh = mp.solutions.face_mesh.FaceMesh(max_num_faces=1, refine_landmarks=True)
         self.mp_drawing = mp.solutions.drawing_utils
+        self.landmarks = None
+        self.w = None
+        self.h = None
 
     def _analyze(self, frame):
         """
@@ -50,12 +50,16 @@ class GazeTrackingEngine:
             )
 
             self._extract_eye_landmarks(landmarks, frame.shape[:2])
-            self.head_orientation = self._calculate_head_orientation(landmarks, frame.shape[1], frame.shape[0])
+            self.landmarks = landmarks
+            self.w = frame.shape[1]
+            self.h = frame.shape[0]
 
-            forehead_region = self._extract_forehead_region(landmarks, frame)
-            return forehead_region
+            for eye in (self.eye_left, self.eye_right):
+                if eye:
+                    for point in eye:
+                        cv2.circle(frame, point, 2, (0, 255, 0), -1)
 
-        return None
+        return frame
 
     def _extract_eye_landmarks(self, landmarks, frame_shape):
         """
@@ -69,7 +73,7 @@ class GazeTrackingEngine:
         self.eye_left = get_landmark_points([33, 133, 468, 159, 145])
         self.eye_right = get_landmark_points([362, 263, 473, 386, 374])
 
-    def _extract_forehead_region(self, landmarks, frame):
+    def extract_forehead_region(self, frame):
         """
         Extract forehead region using expanded forehead landmarks.
         """
@@ -77,7 +81,7 @@ class GazeTrackingEngine:
 
         try:
             forehead_landmarks = [
-                landmarks.landmark[i] for i in [67, 103, 10, 338, 297, 332, 284, 251, 389, 356]
+                self.landmarks.landmark[i] for i in [67, 103, 10, 338, 297, 332, 284, 251, 389, 356]
             ]
         except IndexError:
             return None
@@ -89,17 +93,18 @@ class GazeTrackingEngine:
 
         return frame[y1:y2, x1:x2]
 
-    def _calculate_head_orientation(self, landmarks, w, h):
+    def calculate_head_orientation(self):
         """
         Calculates the head orientation (yaw, pitch) using specific landmarks.
         """
         indices = [1, 33, 61, 199, 263, 291]
         face_3d = []
         face_2d = []
+        landmarks = self.landmarks
 
         for i in indices:
             lm = landmarks.landmark[i]
-            x, y = int(lm.x * w), int(lm.y * h)
+            x, y = int(lm.x * self.w), int(lm.y * self.h)
             face_2d.append([x, y])
             face_3d.append([x, y, lm.z])
 
@@ -109,8 +114,8 @@ class GazeTrackingEngine:
         face_2d = np.array(face_2d, dtype=np.float64)
         face_3d = np.array(face_3d, dtype=np.float64)
 
-        focal_length = w
-        cam_matrix = np.array([[focal_length, 0, w / 2], [0, focal_length, h / 2], [0, 0, 1]])
+        focal_length = self.w
+        cam_matrix = np.array([[focal_length, 0, self.w / 2], [0, focal_length, self.h / 2], [0, 0, 1]])
         dist_matrix = np.zeros((4, 1), dtype=np.float64)
 
         success, rot_vec, trans_vec = cv2.solvePnP(face_3d, face_2d, cam_matrix, dist_matrix)
@@ -124,9 +129,11 @@ class GazeTrackingEngine:
         yaw = angles[1] * 3
         pitch = angles[0] * 3
 
-        return {"yaw": yaw, "pitch": pitch}
+        orientation = f"{'Left' if yaw < -0.04 else 'Right' if yaw > 0.04 else 'Up' if pitch > 0.04 else 'Down' if pitch < -0.04 else 'Center'}"
+        return orientation
 
     def _calculate_ratios(self, eye):
+
         """
         Calculate horizontal and vertical ratios for a given eye.
         """
@@ -195,41 +202,34 @@ class GazeTrackingEngine:
             return avg_horizontal, avg_vertical
         return None, None
 
-    def annotated_frame(self):
+    def annotate_frame(self, frame, x, y):
         """
         Overlays gaze direction, blinking state, and head orientation on the frame.
         """
-        frame = self.frame.copy()
         current_time = time.time()
-
-        for eye in (self.eye_left, self.eye_right):
-            if eye:
-                for point in eye:
-                    cv2.circle(frame, point, 2, (0, 255, 0), -1)
-
+        gaze_text = "Gaze Direction: "
         horizontal, vertical = self.calculate_gaze()
-        if horizontal == None and vertical == None:
-            gaze_text = "No Gaze Detected"
+        if horizontal is None and vertical is None:
+            gaze_text += "No Gaze Detected"
         elif horizontal == -2 and vertical == -2:
-            gaze_text = "Eyes closed"
+            gaze_text += "Eyes closed"
             if self.blink_timer is None:
                 self.blink_timer = current_time
             elif current_time - self.blink_timer > 2:
-                cv2.putText(frame, "Warning! Eyes closed!", (140, 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                gaze_text = "Gaze Direction: "
+                cv2.putText(frame, "Warning! Eyes closed!", (5 * x, y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
         elif horizontal == 0 and vertical == 0:
             self.blink_timer = None
-            gaze_text = "Looking Center"
+            gaze_text += "Center"
         else:
             self.blink_timer = None
-            gaze_text = f"{'Left' if horizontal == -1 else 'Right' if horizontal == 1 else 'Center'} and {'Up' if vertical == -1 else 'Down' if vertical == 1 else 'Center'}"
+            gaze_text += f"{'Left' if horizontal == -1 else 'Right' if horizontal == 1 else 'Center'} and {'Up' if vertical == -1 else 'Down' if vertical == 1 else 'Center'}"
 
-        cv2.putText(frame, gaze_text, (30, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
-        if self.head_orientation:
-            yaw, pitch = self.head_orientation["yaw"], self.head_orientation["pitch"]
-            orientation_text = f"Head: {'Left' if yaw < -0.04 else 'Right' if yaw > 0.04 else 'Center'}, "
-            orientation_text += f"{'Up' if pitch > 0.04 else 'Down' if pitch < -0.04 else 'Center'}"
-            cv2.putText(frame, orientation_text, (30, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(frame, gaze_text, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(frame, f"Head Direction: {self.calculate_head_orientation()}", (x, y + x),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5, (255, 255, 255),
+                    1)
 
         return frame

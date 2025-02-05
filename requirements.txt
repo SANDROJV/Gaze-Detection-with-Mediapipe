@@ -1,0 +1,10 @@
+mediapipe~=0.10.18
+opencv-python~=4.10.0.82
+torch~=2.2.2+cu121
+numpy~=1.26.4
+seaborn~=0.13.2
+matplotlib~=3.8.4
+pandas~=2.2.2
+configparser~=7.0.0
+scipy~=1.14.1
+python-dotenv~=1.0.1

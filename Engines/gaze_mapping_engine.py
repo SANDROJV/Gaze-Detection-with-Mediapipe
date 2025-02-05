@@ -9,14 +9,14 @@ import configparser
 
 
 class GazeMappingEngine:
-    def __init__(self, session_csv="session_data.csv", study_csv="study_data.csv", interval=1.5):
-        self.session_csv = session_csv
-        self.study_csv = study_csv
-        self.interval = interval
+    def __init__(self):
+        self.session_csv = "./Engines/Data/session_data.csv"
+        self.study_csv = "./Engines/Data/study_data.csv"
+        self.interval = 1.5
         self.last_record_time = 0
 
         self.config = configparser.ConfigParser()
-        self.config.read('config.ini')
+        self.config.read('./Engines/Data/config.ini')
 
         self.horizontal_left_threshold = float(self.config['THRESHOLDS']['HORIZONTAL_LEFT'])
         self.horizontal_right_threshold = float(self.config['THRESHOLDS']['HORIZONTAL_RIGHT'])
